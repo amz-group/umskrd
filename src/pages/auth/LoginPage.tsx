@@ -21,15 +21,26 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
 
+    console.log('[Login] Starting login process for:', email);
     const result = await signIn(email, password);
+    console.log('[Login] signIn result - error:', result.error ? 'yes' : 'no', 'profile:', result.profile ? 'found' : 'not found');
 
     if (result.error) {
+      console.log('[Login] Login failed, showing error');
       setError(t('auth.invalidCredentials'));
       setLoading(false);
       return;
     }
 
-    navigate('/dashboard');
+    // Check if profile exists
+    if (result.profile) {
+      console.log('[Login] Login successful with profile, navigating to dashboard');
+      navigate('/dashboard');
+    } else {
+      console.log('[Login] Login successful but no profile found');
+      setError('Profile not found. Please contact support.');
+      setLoading(false);
+    }
   };
 
   return (

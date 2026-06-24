@@ -23,7 +23,10 @@ const ProtectedRoute: React.FC<{
 }> = ({ children, roles }) => {
   const { profile, loading } = useAuth();
 
+  console.log('[ProtectedRoute] loading:', loading, 'profile:', profile ? `id: ${profile.id}` : 'null');
+
   if (loading) {
+    console.log('[ProtectedRoute] Still loading, showing spinner');
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
@@ -32,20 +35,26 @@ const ProtectedRoute: React.FC<{
   }
 
   if (!profile) {
+    console.log('[ProtectedRoute] No profile, redirecting to login');
     return <Navigate to="/login" replace />;
   }
 
   if (roles && !roles.includes(profile.role)) {
+    console.log('[ProtectedRoute] Role not allowed, redirecting to dashboard');
     return <Navigate to="/dashboard" replace />;
   }
 
+  console.log('[ProtectedRoute] Access granted, rendering children');
   return <>{children}</>;
 };
 
 const PublicRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { profile, loading } = useAuth();
 
+  console.log('[PublicRoute] loading:', loading, 'profile:', profile ? `id: ${profile.id}` : 'null');
+
   if (loading) {
+    console.log('[PublicRoute] Still loading, showing spinner');
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
@@ -54,9 +63,11 @@ const PublicRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   }
 
   if (profile) {
+    console.log('[PublicRoute] Profile exists, redirecting to dashboard');
     return <Navigate to="/dashboard" replace />;
   }
 
+  console.log('[PublicRoute] No profile, rendering public page');
   return <>{children}</>;
 };
 
