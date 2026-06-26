@@ -2,60 +2,35 @@ import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { GraduationCap, Mail, Lock, Eye, EyeOff, ArrowRight, RefreshCw } from 'lucide-react';
+import { GraduationCap, Mail, Lock, Eye, EyeOff, ArrowRight } from 'lucide-react';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 
 export default function LoginPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { signIn, refreshProfile, user } = useAuth();
+  const { signIn } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [retrying, setRetrying] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
-    setRetrying(false);
 
-    console.log('[Login] Starting login process for:', email);
     const result = await signIn(email, password);
-    console.log('[Login] signIn result - error:', result.error ? 'yes' : 'no', 'profile:', result.profile ? 'found' : 'not found');
 
     if (result.error) {
-      console.log('[Login] Login failed:', result.error.message);
       setError(result.error.message || t('auth.invalidCredentials'));
       setLoading(false);
       return;
     }
 
-    // Check if profile exists
-    if (result.profile) {
-      console.log('[Login] Login successful with profile, navigating to dashboard');
-      navigate('/dashboard');
-    } else {
-      // Profile still not found - try refreshing
-      console.log('[Login] Profile not found after signIn, attempting retry');
-      setRetrying(true);
-
-      // Wait and retry
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      if (user) {
-        console.log('[Login] Refreshing profile for user:', user.id);
-        await refreshProfile();
-        navigate('/dashboard');
-      } else {
-        setError('Unable to load user profile. Please try again.');
-        setLoading(false);
-        setRetrying(false);
-      }
-    }
+    // Navigate to dashboard - the profile is fetched/ready in signIn
+    navigate('/dashboard');
   };
 
   return (
@@ -80,13 +55,6 @@ export default function LoginPage() {
             {error && (
               <div className="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm p-3 rounded-lg">
                 {error}
-              </div>
-            )}
-
-            {retrying && (
-              <div className="bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 text-sm p-3 rounded-lg flex items-center gap-2">
-                <RefreshCw className="w-4 h-4 animate-spin" />
-                Loading your profile...
               </div>
             )}
 
