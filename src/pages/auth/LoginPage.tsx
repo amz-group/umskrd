@@ -2,32 +2,34 @@ import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { GraduationCap, Mail, Lock, Eye, EyeOff, ArrowRight } from 'lucide-react';
+import { GraduationCap, Mail, Lock, Eye, EyeOff, ArrowRight, RefreshCw } from 'lucide-react';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 
 export default function LoginPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { signIn } = useAuth();
+  const { signIn, refreshProfile, user } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [retrying, setRetrying] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
+    setRetrying(false);
 
     console.log('[Login] Starting login process for:', email);
     const result = await signIn(email, password);
     console.log('[Login] signIn result - error:', result.error ? 'yes' : 'no', 'profile:', result.profile ? 'found' : 'not found');
 
     if (result.error) {
-      console.log('[Login] Login failed, showing error');
-      setError(t('auth.invalidCredentials'));
+      console.log('[Login] Login failed:', result.error.message);
+      setError(result.error.message || t('auth.invalidCredentials'));
       setLoading(false);
       return;
     }
@@ -37,9 +39,22 @@ export default function LoginPage() {
       console.log('[Login] Login successful with profile, navigating to dashboard');
       navigate('/dashboard');
     } else {
-      console.log('[Login] Login successful but no profile found');
-      setError('Profile not found. Please contact support.');
-      setLoading(false);
+      // Profile still not found - try refreshing
+      console.log('[Login] Profile not found after signIn, attempting retry');
+      setRetrying(true);
+
+      // Wait and retry
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      if (user) {
+        console.log('[Login] Refreshing profile for user:', user.id);
+        await refreshProfile();
+        navigate('/dashboard');
+      } else {
+        setError('Unable to load user profile. Please try again.');
+        setLoading(false);
+        setRetrying(false);
+      }
     }
   };
 
@@ -68,6 +83,13 @@ export default function LoginPage() {
               </div>
             )}
 
+            {retrying && (
+              <div className="bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 text-sm p-3 rounded-lg flex items-center gap-2">
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                Loading your profile...
+              </div>
+            )}
+
             <Input
               label={t('email')}
               type="email"
@@ -76,6 +98,7 @@ export default function LoginPage() {
               placeholder="your.email@university.edu"
               leftIcon={<Mail className="w-5 h-5" />}
               required
+              disabled={loading}
             />
 
             <Input
@@ -83,7 +106,7 @@ export default function LoginPage() {
               type={showPassword ? 'text' : 'password'}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
+              placeholder="********"
               leftIcon={<Lock className="w-5 h-5" />}
               rightIcon={
                 <button
@@ -95,6 +118,7 @@ export default function LoginPage() {
                 </button>
               }
               required
+              disabled={loading}
             />
 
             <div className="flex items-center justify-between">
@@ -110,7 +134,13 @@ export default function LoginPage() {
               </Link>
             </div>
 
-            <Button type="submit" loading={loading} className="w-full" icon={<ArrowRight className="w-4 h-4" />} iconPosition="right">
+            <Button
+              type="submit"
+              loading={loading}
+              className="w-full"
+              icon={<ArrowRight className="w-4 h-4" />}
+              iconPosition="right"
+            >
               {t('login')}
             </Button>
           </form>
@@ -127,7 +157,7 @@ export default function LoginPage() {
 
             <div className="mt-6">
               <Link to="/register">
-                <Button variant="outline" className="w-full">
+                <Button variant="outline" className="w-full" disabled={loading}>
                   {t('register')}
                 </Button>
               </Link>

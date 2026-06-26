@@ -13,6 +13,7 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   updateProfile: (updates: Partial<Profile>) => Promise<{ error: Error | null }>;
   isRole: (roles: UserRole | UserRole[]) => boolean;
+  refreshProfile: () => Promise<void>;
 }
 
 interface SignUpData {
@@ -32,37 +33,94 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const profileFetchInProgress = useRef<string | null>(null);
 
-  const fetchProfile = useCallback(async (userId: string) => {
-    console.log('[Auth] fetchProfile called for:', userId);
-    if (profileFetchInProgress.current === userId) {
-      console.log('[Auth] Profile fetch already in progress, skipping');
-      return;
-    }
-    profileFetchInProgress.current = userId;
+  // Function to ensure profile exists and fetch it
+  // Uses the database function that auto-creates missing profiles
+  const ensureAndFetchProfile = useCallback(async (userId: string): Promise<Profile | null> => {
+    console.log('[Auth] ensureAndFetchProfile for user:', userId);
 
     try {
-      console.log('[Auth] Querying profiles table for user:', userId);
-      const { data, error } = await supabase
+      // First try to get existing profile
+      const { data: existingProfile, error: fetchError } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
         .maybeSingle();
 
-      if (error) {
-        console.error('[Auth] Error fetching profile:', error);
-        setProfile(null);
-        return;
+      if (fetchError) {
+        console.error('[Auth] Error fetching profile:', fetchError);
       }
 
-      console.log('[Auth] Profile fetched successfully:', data ? 'found' : 'not found');
-      setProfile(data);
+      if (existingProfile) {
+        console.log('[Auth] Profile found:', existingProfile.id);
+        return existingProfile;
+      }
+
+      console.log('[Auth] Profile not found, calling ensure_profile_exists RPC');
+
+      // Profile doesn't exist - use RPC to create it
+      const { data: newProfile, error: rpcError } = await supabase
+        .rpc('ensure_profile_exists');
+
+      if (rpcError) {
+        console.error('[Auth] Error calling ensure_profile_exists:', rpcError);
+
+        // Fallback: Try direct insert (might fail due to RLS, but worth trying)
+        console.log('[Auth] Attempting direct profile insert as fallback');
+        const { data: insertedProfile, error: insertError } = await supabase
+          .from('profiles')
+          .insert([{
+            id: userId,
+            user_id: userId,
+            email: (await supabase.auth.getUser()).data.user?.email || 'unknown@email.com',
+            first_name: 'User',
+            last_name: 'Name',
+            role: 'student',
+            status: 'pending'
+          }])
+          .select()
+          .maybeSingle();
+
+        if (insertError) {
+          console.error('[Auth] Direct insert failed:', insertError);
+          return null;
+        }
+
+        if (insertedProfile) {
+          console.log('[Auth] Profile created via direct insert');
+          return insertedProfile;
+        }
+      } else if (newProfile && Array.isArray(newProfile) && newProfile.length > 0) {
+        console.log('[Auth] Profile created/fetched via RPC:', newProfile[0]?.id);
+        return newProfile[0];
+      } else if (newProfile && !Array.isArray(newProfile)) {
+        console.log('[Auth] Profile created/fetched via RPC:', newProfile?.id);
+        return newProfile as Profile;
+      }
+
+      console.log('[Auth] Could not create profile');
+      return null;
     } catch (err) {
-      console.error('[Auth] Exception fetching profile:', err);
-      setProfile(null);
+      console.error('[Auth] Exception in ensureAndFetchProfile:', err);
+      return null;
+    }
+  }, []);
+
+  const fetchProfile = useCallback(async (userId: string): Promise<Profile | null> => {
+    console.log('[Auth] fetchProfile called for:', userId);
+    if (profileFetchInProgress.current === userId) {
+      console.log('[Auth] Profile fetch already in progress, skipping');
+      return profile;
+    }
+    profileFetchInProgress.current = userId;
+
+    try {
+      const fetchedProfile = await ensureAndFetchProfile(userId);
+      setProfile(fetchedProfile);
+      return fetchedProfile;
     } finally {
       profileFetchInProgress.current = null;
     }
-  }, []);
+  }, [ensureAndFetchProfile, profile]);
 
   useEffect(() => {
     let mounted = true;
@@ -134,6 +192,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signUp = async (email: string, password: string, userData: SignUpData) => {
     try {
+      console.log('[Auth] Starting signUp for:', email);
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
@@ -148,36 +207,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         },
       });
 
-      if (error) throw error;
+      if (error) {
+        console.error('[Auth] SignUp error:', error);
+        throw error;
+      }
 
-      // Profile is automatically created by database trigger
-      // Fallback: if the trigger somehow didn't create it, try manually
+      console.log('[Auth] SignUp successful, user:', data.user?.id);
+
+      // Profile is created by database trigger, but let's verify
       if (data.user) {
-        const { data: existingProfile } = await supabase
-          .from('profiles')
-          .select('id')
-          .eq('id', data.user.id)
-          .maybeSingle();
+        // Wait a moment for the trigger to execute
+        await new Promise(resolve => setTimeout(resolve, 500));
 
-        if (!existingProfile) {
-          const profileData = {
-            id: data.user.id,
-            user_id: data.user.id,
-            email: data.user.email!,
-            first_name: userData.first_name,
-            last_name: userData.last_name,
-            role: userData.role || 'student',
-            phone: userData.phone,
-            gender: userData.gender,
-            status: 'pending' as const,
-          };
-
-          await supabase.from('profiles').insert([profileData]);
+        const profile = await ensureAndFetchProfile(data.user.id);
+        if (profile) {
+          console.log('[Auth] Profile verified/created for new user');
+          setProfile(profile);
         }
       }
 
       return { error: null };
     } catch (error) {
+      console.error('[Auth] SignUp exception:', error);
       return { error: error as Error };
     }
   };
@@ -202,29 +253,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSession(data.session);
       setUser(data.user);
 
-      // Fetch profile before returning - this ensures the profile is ready
-      // before the navigation happens
+      // Fetch or create profile
       let fetchedProfile: Profile | null = null;
       if (data.user) {
-        console.log('[Auth] Fetching profile for user:', data.user.id);
-
-        // Direct query without using fetchProfile to get the profile value
-        const { data: profileData, error: profileError } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', data.user.id)
-          .maybeSingle();
-
-        if (profileError) {
-          console.error('[Auth] Profile query error:', profileError);
+        console.log('[Auth] Ensuring profile exists for user:', data.user.id);
+        fetchedProfile = await ensureAndFetchProfile(data.user.id);
+        if (fetchedProfile) {
+          console.log('[Auth] Profile ready:', fetchedProfile.id);
+          setProfile(fetchedProfile);
         } else {
-          console.log('[Auth] Profile fetched:', profileData ? 'found' : 'not found');
-          fetchedProfile = profileData;
-          setProfile(profileData);
+          console.error('[Auth] Failed to get/create profile');
         }
       }
 
-      console.log('[Auth] signIn complete');
+      console.log('[Auth] signIn complete, profile:', fetchedProfile ? 'available' : 'null');
       return { error: null, profile: fetchedProfile };
     } catch (error) {
       console.error('[Auth] signIn exception:', error);
@@ -233,10 +275,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
+    console.log('[Auth] Signing out');
     await supabase.auth.signOut();
     setSession(null);
     setUser(null);
     setProfile(null);
+    console.log('[Auth] Sign out complete');
   };
 
   const updateProfile = async (updates: Partial<Profile>) => {
@@ -257,6 +301,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const refreshProfile = async () => {
+    if (user) {
+      const freshProfile = await ensureAndFetchProfile(user.id);
+      setProfile(freshProfile);
+    }
+  };
+
   const isRole = useCallback((roles: UserRole | UserRole[]) => {
     if (!profile) return false;
     const roleArray = Array.isArray(roles) ? roles : [roles];
@@ -273,6 +324,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     signOut,
     updateProfile,
     isRole,
+    refreshProfile,
   };
 
   return (

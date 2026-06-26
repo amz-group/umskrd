@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
-import { GraduationCap, Mail, Lock, Eye, EyeOff, User, Phone, ArrowRight, ArrowLeft } from 'lucide-react';
+import { GraduationCap, Mail, Lock, Eye, EyeOff, User, Phone, ArrowRight, ArrowLeft, CheckCircle } from 'lucide-react';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import type { UserRole, Gender } from '../../types';
@@ -10,6 +10,7 @@ import type { UserRole, Gender } from '../../types';
 export default function RegisterPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const location = useLocation();
   const { signUp } = useAuth();
   const [formData, setFormData] = useState({
     email: '',
@@ -24,6 +25,7 @@ export default function RegisterPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState(location.state?.message || '');
 
   const roleOptions = [
     { value: 'student', label: t('nav.students').slice(0, -1) || 'Student' },
@@ -46,6 +48,7 @@ export default function RegisterPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setSuccess('');
 
     if (formData.password !== formData.confirmPassword) {
       setError(t('auth.passwordMismatch'));
@@ -59,6 +62,7 @@ export default function RegisterPage() {
 
     setLoading(true);
 
+    console.log('[Register] Starting registration for:', formData.email);
     const result = await signUp(formData.email, formData.password, {
       first_name: formData.firstName,
       last_name: formData.lastName,
@@ -68,12 +72,20 @@ export default function RegisterPage() {
     });
 
     if (result.error) {
+      console.error('[Register] Registration failed:', result.error.message);
       setError(result.error.message);
       setLoading(false);
       return;
     }
 
-    navigate('/login', { state: { message: t('auth.registerSuccess') } });
+    console.log('[Register] Registration successful');
+    setSuccess(t('auth.registerSuccess'));
+    setLoading(false);
+
+    // Navigate to login after a short delay
+    setTimeout(() => {
+      navigate('/login', { state: { message: t('auth.registerSuccess') } });
+    }, 2000);
   };
 
   return (
@@ -98,6 +110,12 @@ export default function RegisterPage() {
             {error && (
               <div className="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm p-3 rounded-lg">
                 {error}
+              </div>
+            )}
+            {success && (
+              <div className="bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 text-sm p-3 rounded-lg flex items-center gap-2">
+                <CheckCircle className="w-5 h-5" />
+                {success}
               </div>
             )}
 
